@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>منچ سه‌بعدی</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: Tahoma, system-ui, sans-serif; color: #fff; background: radial-gradient(circle at 50% 30%, #2a2f5c, #0a0b18 75%); touch-action: none; user-select: none; }
+  canvas { display: block; }
+  #hud { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 10px); left: 50%; transform: translateX(-50%); display: none; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 999px; background: rgba(0,0,0,.55); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.15); font-size: 15px; white-space: nowrap; }
+  #dot { width: 16px; height: 16px; border-radius: 50%; background: #e53935; box-shadow: 0 0 12px currentColor; }
+  button { font-family: inherit; cursor: pointer; border: 0; color: #fff; font-weight: 700; }
+  #roll { position: fixed; bottom: calc(env(safe-area-inset-bottom, 0px) + 28px); left: 50%; transform: translateX(-50%); display: none; padding: 16px 34px; font-size: 20px; border-radius: 18px; background: linear-gradient(120deg, #7c5cff, #00d4ff); box-shadow: 0 10px 30px rgba(124,92,255,.5); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { transform: translateX(-50%) scale(1.07); } }
+  .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(5,6,15,.82); backdrop-filter: blur(8px); padding: 16px; }
+  .panel { width: min(420px, 100%); padding: 26px 22px; border-radius: 24px; text-align: center; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.15); }
+  .panel h1 { margin: 0 0 6px; font-size: 30px; }
+  .panel p, .panel small { color: #a9afc9; line-height: 1.8; }
+  .row { display: flex; align-items: center; gap: 12px; margin: 10px 0; padding: 10px 14px; border-radius: 14px; background: rgba(255,255,255,.06); }
+  .row i { width: 20px; height: 20px; border-radius: 50%; }
+  .row span { flex: 1; text-align: right; }
+  .row button { min-width: 84px; padding: 8px 14px; border-radius: 10px; background: rgba(255,255,255,.14); }
+  #start, #again { margin: 14px 0 10px; padding: 14px 40px; font-size: 18px; border-radius: 16px; background: linear-gradient(120deg, #7c5cff, #00d4ff); }
+</style>
+</head>
+<body>
+<div id="hud"><span id="dot"></span><span id="status"></span></div>
+<button id="roll">🎲 تاس بنداز</button>
+
+<div id="setup" class="overlay"><div class="panel">
+  <h1>🎲 منچ سه‌بعدی</h1>
+  <p>نوع هر بازیکن رو انتخاب کن</p>
+  <div id="rows"></div>
+  <button id="start">شروع بازی</button><br>
+  <small>برای بازی با دوستان، چند بازیکن رو روی «انسان» بذار و گوشی رو دست‌به‌دست کن. برای چرخوندن صفحه با انگشت روی تخته بکش.</small>
+</div></div>
+
+<div id="win" class="overlay" style="display:none"><div class="panel">
+  <h1 id="winText"></h1>
+  <button id="again">بازی دوباره</button>
+</div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ---------- Constants ----------
+const NAMES = ['قرمز', 'سبز', 'زرد', 'آبی'];
+const COL = [0xe53935, 0x43a047, 0xfdd835, 0x1e88e5];
+const CSS = ['#e53935', '#43a047', '#fdd835', '#1e88e5'];
+const SAFE = new Set([0, 13, 26, 39, 8, 21, 34, 47]);
+const BASE = [[1, 1], [4, 1], [1, 4], [4, 4]];
+const HOME = [1, 2, 3, 4, 5].map(x => [x, 7]);
+
+// Main track: 52 cells, clockwise, index 0 = red start
+const T = []; const P = (x, y) => T.push([x, y]);
+for (let x = 1; x <= 5; x++) P(x, 6);
+for (let y = 5; y >= 0; y--) P(6, y);
+P(7, 0); P(8, 0);
+for (let y = 1; y <= 5; y++) P(8, y);
+for (let x = 9; x <= 14; x++) P(x, 6);
+P(14, 7); P(14, 8);
+for (let x = 13; x >= 9; x--) P(x, 8);
+for (let y = 9; y <= 14; y++) P(8, y);
+P(7, 14); P(6, 14);
+for (let y = 13; y >= 9; y--) P(6, y);
+for (let x = 5; x >= 0; x--) P(x, 8);
+P(0, 7); P(0, 6);
+
+// Rotate a point 90 degrees clockwise n times around the board center
+function rot(p, n) {
+  let x = p[0], y = p[1];
+  for (let i = 0; i < n; i++) { const nx = 14 - y; y = x; x = nx; }
+  return [x, y];
+}
+// Progress: 0 = in base, 1..51 = track, 52..56 = home column, 57 = finished
+function cellOf(c, prog, i) {
+  if (prog === 0) return rot(BASE[i], c);
+  if (prog <= 51) return T[(13 * c + prog - 1) % 52];
+  if (prog <= 56) return rot(HOME[prog - 52], c);
+  return rot([6.3, 6.6 + 0.27 * i], c);
+}
+function absIdx(c, prog) { return prog >= 1 && prog <= 51 ? (13 * c + prog - 1) % 52 : -1; }
+
+// ---------- Three.js setup ----------
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 300);
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.prepend(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 0.75));
+const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+sun.position.set(8, 20, 10); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12 });
+scene.add(sun);
+
+// ---------- Board ----------
+function boardTex() {
+  const U = 100, c = document.createElement('canvas');
+  c.width = c.height = 1500;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f7f0df'; g.fillRect(0, 0, 1500, 1500);
+  [[0, 0], [9, 0], [9, 9], [0, 9]].forEach(([x, y], k) => {
+    g.fillStyle = CSS[k]; g.fillRect(x * U, y * U, 6 * U, 6 * U);
+    g.fillStyle = '#fff'; g.fillRect((x + .75) * U, (y + .75) * U, 4.5 * U, 4.5 * U);
+    BASE.forEach(b => {
+      const [sx, sy] = rot(b, k);
+      g.beginPath(); g.arc((sx + .5) * U, (sy + .5) * U, .42 * U, 0, 7);
+      g.fillStyle = CSS[k]; g.fill(); g.lineWidth = 4; g.strokeStyle = '#333'; g.stroke();
+    });
+  });
+  g.lineWidth = 3; g.strokeStyle = '#3a3a3a';
+  const cell = (x, y, f) => { g.fillStyle = f; g.fillRect(x * U, y * U, U, U); g.strokeRect(x * U, y * U, U, U); };
+  T.forEach(([x, y], i) => cell(x, y, i % 13 === 0 ? CSS[i / 13] : '#fff'));
+  for (let k = 0; k < 4; k++) HOME.forEach(h => { const [x, y] = rot(h, k); cell(x, y, CSS[k]); });
+  g.font = '70px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#999';
+  for (let k = 0; k < 4; k++) { const [x, y] = T[8 + 13 * k]; g.fillText('★', (x + .5) * U, (y + .55) * U); }
+  const tri = [
+    [[6, 6], [6, 9]], [[6, 6], [9, 6]], [[9, 6], [9, 9]], [[6, 9], [9, 9]]
+  ];
+  tri.forEach(([a, b], k) => {
+    g.beginPath(); g.moveTo(a[0] * U, a[1] * U); g.lineTo(b[0] * U, b[1] * U); g.lineTo(7.5 * U, 7.5 * U);
+    g.closePath(); g.fillStyle = CSS[k]; g.fill(); g.stroke();
+  });
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = 8;
+  return t;
+}
+const frame = new THREE.Mesh(new THREE.BoxGeometry(16.2, 0.6, 16.2), new THREE.MeshStandardMaterial({ color: 0x4a2c17, roughness: 0.6 }));
+frame.receiveShadow = true; scene.add(frame);
+const board = new THREE.Mesh(new THREE.PlaneGeometry(15, 15), new THREE.MeshStandardMaterial({ map: boardTex(), roughness: 0.5 }));
+board.rotation.x = -Math.PI / 2; board.position.y = 0.31; board.receiveShadow = true;
+scene.add(board);
+
+// ---------- Dice ----------
+function pipTex(n) {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fafafa'; g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = '#ccc'; g.lineWidth = 4; g.strokeRect(2, 2, 124, 124);
+  g.fillStyle = n === 1 ? '#e53935' : '#222';
+  const L = [32, 64, 96];
+  const map = { 1: [[1, 1]], 2: [[0, 0], [2, 2]], 3: [[0, 0], [1, 1], [2, 2]], 4: [[0, 0], [2, 0], [0, 2], [2, 2]],
+    5: [[0, 0], [2, 0], [1, 1], [0, 2], [2, 2]], 6: [[0, 0], [2, 0], [0, 1], [2, 1], [0, 2], [2, 2]] };
+  map[n].forEach(([x, y]) => { g.beginPath(); g.arc(L[x], L[y], 10, 0, 7); g.fill(); });
+  return new THREE.CanvasTexture(c);
+}
+// Face order for BoxGeometry: +x, -x, +y, -y, +z, -z (opposite faces sum to 7)
+const dice = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.4, 1.4),
+  [3, 4, 1, 6, 2, 5].map(v => new THREE.MeshStandardMaterial({ map: pipTex(v), roughness: 0.3 })));
+dice.castShadow = true; dice.position.set(0, 2.8, 0);
+scene.add(dice);
+const H = Math.PI / 2;
+const EU = { 1: [0, 0, 0], 6: [Math.PI, 0, 0], 2: [-H, 0, 0], 5: [H, 0, 0], 3: [0, 0, H], 4: [0, 0, -H] };
+let rolling = false;
+dice.rotation.set(...EU[1]);
+
+// ---------- Helpers ----------
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function tween(d, fn) {
+  return new Promise(res => {
+    const t0 = performance.now();
+    (function step() {
+      const t = Math.min(1, (performance.now() - t0) / (d * 1000));
+      fn(t);
+      t < 1 ? requestAnimationFrame(step) : res();
+    })();
+  });
+}
+async function rollDice(v) {
+  rolling = true;
+  const qT = new THREE.Quaternion().setFromEuler(new THREE.Euler(...EU[v]));
+  const qS = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.random() * 6, Math.random() * 6, Math.random() * 6));
+  const ax = new THREE.Vector3(Math.random() + .1, Math.random(), Math.random()).normalize();
+  const q = new THREE.Quaternion(), qs = new THREE.Quaternion();
+  await tween(1.1, t => {
+    const k = 1 - Math.pow(1 - t, 3);
+    q.copy(qS).slerp(qT, k);
+    qs.setFromAxisAngle(ax, (1 - k) * 14);
+    dice.quaternion.copy(qs).multiply(q);
+    dice.position.y = 2.8 + Math.sin(t * Math.PI) * 2.5;
+  });
+  rolling = false;
+}
+
+// ---------- Pieces ----------
+const pawnGeo = new THREE.LatheGeometry([[0, 0], [.32, 0], [.34, .06], [.2, .14], [.14, .4], [.22, .46], [.22, .52], [.14, .6]]
+  .map(p => new THREE.Vector2(p[0], p[1])), 20);
+const headGeo = new THREE.SphereGeometry(0.2, 16, 12);
+const BS = 0.85;
+const hits = [];
+let players = [], cur = 0, pickable = [], pickRes = null, rollRes = null;
+
+function makePawn(pl, i) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: COL[pl.c], roughness: 0.3, metalness: 0.3 });
+  const body = new THREE.Mesh(pawnGeo, mat), head = new THREE.Mesh(headGeo, mat);
+  head.position.y = 0.8; body.castShadow = head.castShadow = true;
+  const hit = new THREE.Mesh(new THREE.SphereGeometry(0.65, 8, 8),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+  hit.position.y = 0.5; hit.userData.ref = { pl, i };
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.62, 24), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }));
+  ring.rotation.x = -H; ring.position.y = 0.03; ring.visible = false;
+  g.add(body, head, hit, ring);
+  g.userData.ring = ring; g.scale.setScalar(BS);
+  scene.add(g); hits.push(hit);
+  return g;
+}
+function place(pl, i, dx, dz) {
+  const [x, y] = cellOf(pl.c, pl.prog[i], i);
+  pl.mesh[i].position.set(x - 7 + dx, 0.31, y - 7 + dz);
+}
+// Place all pieces; pieces sharing a cell are spread out slightly
+function settle() {
+  const groups = {};
+  players.forEach(pl => pl.prog.forEach((p, i) => {
+    if (p === 0 || p === 57) { place(pl, i, 0, 0); pl.mesh[i].scale.setScalar(BS); return; }
+    const k = cellOf(pl.c, p, i).join();
+    (groups[k] = groups[k] || []).push([pl, i]);
+  }));
+  for (const k in groups) {
+    const g = groups[k];
+    g.forEach(([pl, i], n) => {
+      const a = n / g.length * Math.PI * 2, r = g.length > 1 ? 0.22 : 0;
+      place(pl, i, Math.cos(a) * r, Math.sin(a) * r);
+      pl.mesh[i].scale.setScalar(g.length > 1 ? BS * 0.8 : BS);
+    });
+  }
+}
+async function hop(pl, i) {
+  const m = pl.mesh[i], [cx, cy] = cellOf(pl.c, pl.prog[i], i);
+  const f = m.position.clone(), to = new THREE.Vector3(cx - 7, 0.31, cy - 7);
+  await tween(0.2, t => { m.position.lerpVectors(f, to, t); m.position.y = 0.31 + Math.sin(t * Math.PI) * 0.5; });
+}
+
+// ---------- Game rules ----------
+function legalMoves(pl, roll) {
+  const r = [];
+  pl.prog.forEach((p, i) => { if (p === 0 ? roll === 6 : p + roll <= 57) r.push(i); });
+  return r;
+}
+async function doMove(pl, i, roll) {
+  const p = pl.prog[i];
+  const steps = p === 0 ? [1] : Array.from({ length: roll }, (_, k) => p + k + 1);
+  for (const s of steps) { pl.prog[i] = s; await hop(pl, i); }
+  let cap = false;
+  const a = absIdx(pl.c, pl.prog[i]);
+  if (a >= 0 && !SAFE.has(a)) {
+    for (const o of players) {
+      if (o === pl) continue;
+      for (let j = 0; j < 4; j++) {
+        if (absIdx(o.c, o.prog[j]) !== a) continue;
+        o.prog[j] = 0; cap = true;
+        const [bx, by] = cellOf(o.c, 0, j), m = o.mesh[j], f = m.position.clone();
+        await tween(0.5, t => m.position.set(f.x + (bx - 7 - f.x) * t, 0.31 + Math.sin(t * Math.PI) * 2, f.z + (by - 7 - f.z) * t));
+      }
+    }
+  }
+  settle();
+  return cap;
+}
+function botPick(pl, moves, roll) {
+  let best = moves[0], bs = -1e9;
+  for (const i of moves) {
+    const p = pl.prog[i], np = p === 0 ? 1 : p + roll;
+    let s = np * 0.5 + Math.random() * 5;
+    if (np === 57) s += 90;
+    if (p === 0) s += 60;
+    if (np >= 52 && np < 57) s += 35;
+    const a = absIdx(pl.c, np);
+    if (a >= 0) {
+      if (SAFE.has(a)) s += 25;
+      else if (players.some(o => o !== pl && o.prog.some(q => absIdx(o.c, q) === a))) s += 100;
+    }
+    if (s > bs) { bs = s; best = i; }
+  }
+  return best;
+}
+
+// ---------- Turn flow ----------
+const dot = document.getElementById('dot'), statusEl = document.getElementById('status'), rollBtn = document.getElementById('roll');
+function status(t, c) { statusEl.textContent = t; if (c !== undefined) dot.style.color = dot.style.background = CSS[c]; }
+function waitRoll() {
+  return new Promise(res => { rollRes = () => { rollRes = null; rollBtn.style.display = 'none'; res(); }; rollBtn.style.display = 'block'; });
+}
+function pickPiece(pl, moves) {
+  return new Promise(res => {
+    pickable = moves;
+    moves.forEach(i => pl.mesh[i].userData.ring.visible = true);
+    pickRes = i => { pickRes = null; pickable = []; moves.forEach(j => pl.mesh[j].userData.ring.visible = false); settle(); res(i); };
+    status('روی یکی از مهره‌های چشمک‌زن بزن', pl.c);
+  });
+}
+async function turn() {
+  const pl = players[cur];
+  azT = -3 * Math.PI / 4 - pl.c * H;
+  if (pl.human) { status('نوبت ' + NAMES[pl.c] + ': تاس بنداز', pl.c); await waitRoll(); }
+  else { status(NAMES[pl.c] + ' (ربات) داره بازی می‌کنه', pl.c); await sleep(700); }
+  const roll = Math.floor(Math.random() * 6) + 1;
+  await rollDice(roll);
+  const moves = legalMoves(pl, roll);
+  let extra = roll === 6;
+  if (!moves.length) { status('حرکتی ممکن نیست', pl.c); await sleep(800); }
+  else {
+    let m;
+    if (pl.human) m = moves.length === 1 ? moves[0] : await pickPiece(pl, moves);
+    else { await sleep(500); m = botPick(pl, moves, roll); }
+    const cap = await doMove(pl, m, roll);
+    if (cap || pl.prog[m] === 57) extra = true;
+    if (pl.prog.every(p => p === 57)) {
+      document.getElementById('winText').textContent = '🏆 ' + NAMES[pl.c] + ' برنده شد!';
+      document.getElementById('win').style.display = 'flex';
+      return;
+    }
+  }
+  if (!extra) cur = (cur + 1) % players.length;
+  turn();
+}
+function startGame(modes) {
+  modes.forEach((m, c) => {
+    if (m === 'off') return;
+    const pl = { c, human: m === 'human', prog: [0, 0, 0, 0], mesh: [] };
+    for (let i = 0; i < 4; i++) pl.mesh.push(makePawn(pl, i));
+    players.push(pl);
+  });
+  settle(); cur = 0;
+  document.getElementById('hud').style.display = 'flex';
+  turn();
+}
+
+// ---------- Setup screen ----------
+const modes = ['human', 'bot', 'bot', 'bot'], LABEL = { human: 'انسان', bot: 'ربات', off: 'خاموش' };
+const rowsEl = document.getElementById('rows');
+modes.forEach((m, c) => {
+  const row = document.createElement('div'); row.className = 'row';
+  row.innerHTML = '<i style="background:' + CSS[c] + '"></i><span>' + NAMES[c] + '</span>';
+  const b = document.createElement('button'); b.textContent = LABEL[m];
+  b.onclick = () => { modes[c] = { human: 'bot', bot: 'off', off: 'human' }[modes[c]]; b.textContent = LABEL[modes[c]]; };
+  row.appendChild(b); rowsEl.appendChild(row);
+});
+document.getElementById('start').onclick = () => {
+  if (modes.filter(m => m !== 'off').length < 2) return alert('حداقل دو بازیکن لازمه');
+  document.getElementById('setup').style.display = 'none';
+  startGame(modes);
+};
+document.getElementById('again').onclick = () => location.reload();
+rollBtn.onclick = () => rollRes && rollRes();
+
+// ---------- Camera and input ----------
+let az = -3 * Math.PI / 4, azT = az, el = 1.0, zoom = 1;
+function camDist() {
+  const a = innerWidth / innerHeight;
+  return Math.max(22, 8.8 / (Math.tan(20 * Math.PI / 180) * Math.min(a, 1.6))) * zoom;
+}
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+let down = null, dragged = false;
+const cv = renderer.domElement;
+cv.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY }; dragged = false; });
+cv.addEventListener('pointermove', e => {
+  if (!down) return;
+  const dx = e.clientX - down.x, dy = e.clientY - down.y;
+  if (!dragged && Math.hypot(dx, dy) < 6) return;
+  dragged = true;
+  az -= dx * 0.008; azT = az;
+  el = Math.max(0.55, Math.min(1.4, el + dy * 0.006));
+  down = { x: e.clientX, y: e.clientY };
+});
+cv.addEventListener('pointerup', e => {
+  const wasDrag = dragged; down = null;
+  if (wasDrag) return;
+  const r = cv.getBoundingClientRect();
+  mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  if (pickRes) {
+    const h = ray.intersectObjects(hits)[0];
+    if (h) { const { pl, i } = h.object.userData.ref; if (pl === players[cur] && pickable.includes(i)) pickRes(i); }
+  } else if (rollRes && ray.intersectObject(dice)[0]) rollRes();
+});
+cv.addEventListener('wheel', e => { zoom = Math.max(0.5, Math.min(1.5, zoom + e.deltaY * 0.001)); });
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ---------- Render loop ----------
+function loop(t) {
+  requestAnimationFrame(loop);
+  let d = azT - az; d = Math.atan2(Math.sin(d), Math.cos(d)); az += d * 0.05;
+  const R = camDist();
+  camera.position.set(R * Math.sin(az) * Math.cos(el), R * Math.sin(el), R * Math.cos(az) * Math.cos(el));
+  camera.lookAt(0, 0, 0);
+  if (!rolling) { dice.position.y = 2.8 + Math.sin(t / 500) * 0.15; dice.rotation.y += 0.004; }
+  if (pickRes) {
+    const pl = players[cur];
+    pickable.forEach(i => { pl.mesh[i].position.y = 0.31 + Math.abs(Math.sin(t / 180)) * 0.3; });
+  }
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
