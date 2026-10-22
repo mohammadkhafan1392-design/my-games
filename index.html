@@ -1,12 +1,87 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>My Games</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Games</title>
+<style>
+  :root { --bg: #07080f; --card: rgba(255,255,255,.06); --border: rgba(255,255,255,.12); --text: #f4f5fa; --muted: #9aa0b8; --a1: #7c5cff; --a2: #00d4ff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; overflow-x: hidden; }
+
+  /* Soft glowing background blobs */
+  .blob { position: fixed; border-radius: 50%; filter: blur(90px); opacity: .45; z-index: 0; animation: float 14s ease-in-out infinite alternate; }
+  .blob.one { width: 380px; height: 380px; background: var(--a1); top: -120px; left: -120px; }
+  .blob.two { width: 340px; height: 340px; background: var(--a2); bottom: -120px; right: -100px; animation-delay: -6s; }
+  @keyframes float { to { transform: translate(40px, 50px) scale(1.15); } }
+
+  main { position: relative; z-index: 1; max-width: 960px; margin: 0 auto; padding: 56px 20px 40px; }
+
+  /* Hero */
+  header { text-align: center; margin-bottom: 44px; }
+  .badge { display: inline-block; padding: 6px 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--muted); font-size: 13px; letter-spacing: .08em; text-transform: uppercase; backdrop-filter: blur(10px); }
+  h1 { font-size: clamp(40px, 9vw, 72px); line-height: 1.05; margin: 18px 0 12px; font-weight: 800; letter-spacing: -.03em; background: linear-gradient(120deg, #fff 20%, var(--a2) 55%, var(--a1)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  header p { color: var(--muted); font-size: 17px; margin: 0 auto; max-width: 480px; }
+
+  /* Game cards */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; }
+  .card { position: relative; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 22px; background: var(--card); backdrop-filter: blur(14px); overflow: hidden; text-decoration: none; color: inherit; transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease; }
+  .card:hover { transform: translateY(-6px); border-color: rgba(124,92,255,.7); box-shadow: 0 18px 50px rgba(124,92,255,.25); }
+  .thumb { height: 150px; display: flex; align-items: center; justify-content: center; font-size: 64px; background: linear-gradient(135deg, #1b1f3a, #3a1f5c 60%, #0e5a7a); }
+  .info { padding: 18px 20px 22px; }
+  .info h2 { margin: 0 0 6px; font-size: 20px; }
+  .info p { margin: 0 0 16px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+  .play { display: inline-block; padding: 10px 20px; border-radius: 12px; font-weight: 700; font-size: 14px; color: #fff; background: linear-gradient(120deg, var(--a1), var(--a2)); }
+  .soon { opacity: .55; pointer-events: none; }
+  .soon .thumb { background: linear-gradient(135deg, #1a1c26, #262a3a); }
+  .soon .play { background: var(--card); border: 1px solid var(--border); color: var(--muted); }
+
+  footer { text-align: center; color: var(--muted); font-size: 13px; margin-top: 56px; }
+</style>
 </head>
 <body>
-  <h1>My Games</h1>
-  <p>The site works!</p>
+  <div class="blob one"></div>
+  <div class="blob two"></div>
+
+  <main>
+    <header>
+      <span class="badge">Browser Games</span>
+      <h1>My Games</h1>
+      <p>Play instantly in your browser. No downloads, no installs.</p>
+    </header>
+
+    <section class="grid">
+      <!-- Game 1: link to the folder that contains the game's index.html -->
+      <a class="card" href="city-drive/">
+        <div class="thumb">🚗</div>
+        <div class="info">
+          <h2>City Drive 3D</h2>
+          <p>Cruise a 3D city, dodge traffic, collect coins and escape the police.</p>
+          <span class="play">Play now ▶</span>
+        </div>
+      </a>
+
+      <!-- Placeholder cards: replace these when you add new games -->
+      <div class="card soon">
+        <div class="thumb">🎲</div>
+        <div class="info">
+          <h2>Mench (Ludo)</h2>
+          <p>Classic board game with 3D pieces and dice.</p>
+          <span class="play">Coming soon</span>
+        </div>
+      </div>
+
+      <div class="card soon">
+        <div class="thumb">🕹️</div>
+        <div class="info">
+          <h2>New game</h2>
+          <p>Something fun is on the way.</p>
+          <span class="play">Coming soon</span>
+        </div>
+      </div>
+    </section>
+
+    <footer>Made with ♥ · Hosted on GitHub Pages</footer>
+  </main>
 </body>
 </html>
