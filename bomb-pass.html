@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bomb Pass - بمب دست‌به‌دست</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: Tahoma, Arial, sans-serif; color: #fff; text-align: center; }
+  body { background: #1d7be0; transition: background 0.3s; display: flex; flex-direction: column; padding: 14px; }
+  body.p1 { background: #e63946; }
+  body.p2 { background: #1d7be0; }
+  body.boom { background: #111; }
+  .top { display: flex; justify-content: space-between; font-size: 18px; background: rgba(0,0,0,0.25); border-radius: 14px; padding: 10px 14px; }
+  .center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  #bomb { font-size: 120px; line-height: 1; display: inline-block; }
+  #bomb.shake { animation: shake 0.25s infinite; }
+  @keyframes shake { 0% { transform: rotate(-6deg) scale(1); } 50% { transform: rotate(6deg) scale(1.1); } 100% { transform: rotate(-6deg) scale(1); } }
+  #who { font-size: 28px; font-weight: bold; margin: 12px 0 6px; }
+  #challenge { font-size: 24px; background: rgba(0,0,0,0.3); border-radius: 16px; padding: 14px 18px; margin: 8px 0; min-height: 70px; width: 100%; max-width: 420px; display: flex; align-items: center; justify-content: center; }
+  .big { width: 100%; max-width: 420px; font-size: 30px; font-weight: bold; padding: 22px 0; border: none; border-radius: 22px; background: #fff; color: #222; margin-top: 10px; }
+  .big.yellow { background: #facc15; }
+  .hidden { display: none; }
+  #title { font-size: 34px; margin: 6px 0; }
+  #info { font-size: 18px; opacity: 0.9; padding: 0 10px; margin-bottom: 14px; }
+</style>
+</head>
+<body class="p2">
+  <div class="top">
+    <div>🔴 بازیکن ۱: <b id="s1">0</b></div>
+    <div>🔵 بازیکن ۲: <b id="s2">0</b></div>
+  </div>
+
+  <div class="center">
+    <div id="title">💣 بمب دست‌به‌دست</div>
+    <div id="bomb">💣</div>
+    <div id="info">بمب یه تایمر مخفی داره! هر نفر باید چالش رو بلند بگه و بمب رو پاس بده. هر کس بمب دستش منفجر شد، می‌بازه!</div>
+    <div id="who" class="hidden"></div>
+    <div id="challenge" class="hidden"></div>
+    <button type="button" id="pass" class="big hidden">✅ گفتم! پاس بده</button>
+    <button type="button" id="start" class="big yellow">شروع بازی</button>
+  </div>
+
+<script>
+var challenges = [
+  'اسم یه میوه بگو 🍎', 'اسم یه حیوان بگو 🐯', 'اسم یه شهر ایران بگو 🏙️', 'اسم یه رنگ بگو 🎨',
+  'اسم یه غذا بگو 🍕', 'اسم یه کشور بگو 🌍', 'اسم یه بازیگر یا خواننده بگو 🎤', 'اسم یه وسیله‌ی آشپزخونه بگو 🍳',
+  'اسم یه ورزش بگو ⚽', 'اسم یه شغل بگو 👷', 'اسم یه چیز توی مدرسه بگو 🏫', 'اسم یه بازی موبایلی بگو 🎮',
+  'اسم یه سبزی یا صیفی بگو 🥕', 'اسم یه چیز قرمز بگو 🔴', 'اسم یه پرنده بگو 🦅', 'اسم یه لباس بگو 👕',
+  'اسم یه ماشین بگو 🚗', 'اسم یه شیرینی بگو 🍰', 'اسم یه وسیله‌ی برقی بگو 🔌', 'اسم یه چیز که توی دریا هست بگو 🌊',
+  'یه صدای حیوون در بیار 🐮', 'یه ژست خنده‌دار بگیر 🤪', 'یه کلمه‌ی ۴ حرفی بگو 🔤', 'اسم یه فیلم یا کارتون بگو 🎬'
+];
+
+var score = [0, 0];
+var holder = 1;
+var fuseEnd = 0;
+var tickTimer = null;
+var boomTimer = null;
+var lastChallenge = -1;
+var audioCtx = null;
+
+var bombEl = document.getElementById('bomb');
+var whoEl = document.getElementById('who');
+var chEl = document.getElementById('challenge');
+var passBtn = document.getElementById('pass');
+var startBtn = document.getElementById('start');
+var infoEl = document.getElementById('info');
+var titleEl = document.getElementById('title');
+
+function beep(freq, dur, vol) {
+  try {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!audioCtx) audioCtx = new AC();
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = 'square';
+    o.frequency.value = freq;
+    g.gain.value = vol || 0.06;
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + dur);
+  } catch (e) {}
+}
+
+function updateScores() {
+  document.getElementById('s1').textContent = score[0];
+  document.getElementById('s2').textContent = score[1];
+}
+
+function newChallenge() {
+  var i;
+  do { i = Math.floor(Math.random() * challenges.length); } while (i === lastChallenge);
+  lastChallenge = i;
+  chEl.textContent = challenges[i];
+}
+
+function showHolder() {
+  document.body.className = holder === 1 ? 'p1' : 'p2';
+  whoEl.textContent = 'بمب دست بازیکن ' + holder + ' ' + (holder === 1 ? '🔴' : '🔵');
+  newChallenge();
+}
+
+// Tick faster as the fuse burns down (players don't know the total time)
+function scheduleTick() {
+  var now = Date.now();
+  var left = fuseEnd - now;
+  if (left <= 0) return;
+  beep(left < 4000 ? 1100 : 700, 0.07, 0.05);
+  var delay = Math.max(110, Math.min(700, left / 9));
+  tickTimer = setTimeout(scheduleTick, delay);
+}
+
+function startRound() {
+  clearTimeout(tickTimer);
+  clearTimeout(boomTimer);
+  var total = 12000 + Math.random() * 23000; // 12 to 35 seconds, hidden
+  fuseEnd = Date.now() + total;
+  holder = Math.random() < 0.5 ? 1 : 2;
+
+  titleEl.classList.add('hidden');
+  infoEl.classList.add('hidden');
+  startBtn.classList.add('hidden');
+  whoEl.classList.remove('hidden');
+  chEl.classList.remove('hidden');
+  passBtn.classList.remove('hidden');
+  bombEl.textContent = '💣';
+  bombEl.classList.add('shake');
+  showHolder();
+  scheduleTick();
+  boomTimer = setTimeout(explode, total);
+}
+
+function passBomb() {
+  holder = holder === 1 ? 2 : 1;
+  beep(500, 0.08, 0.07);
+  showHolder();
+}
+
+function explode() {
+  clearTimeout(tickTimer);
+  clearTimeout(boomTimer);
+  bombEl.classList.remove('shake');
+  bombEl.textContent = '💥';
+  document.body.className = 'boom';
+  beep(120, 0.6, 0.15);
+  if (navigator.vibrate) navigator.vibrate([200, 80, 300]);
+
+  var winner = holder === 1 ? 2 : 1;
+  score[winner - 1]++;
+  updateScores();
+
+  passBtn.classList.add('hidden');
+  chEl.classList.add('hidden');
+  whoEl.textContent = 'بمب دست بازیکن ' + holder + ' ترکید! 😂 بازیکن ' + winner + ' یک امتیاز گرفت';
+  startBtn.textContent = 'دست بعدی';
+  startBtn.classList.remove('hidden');
+}
+
+passBtn.onclick = passBomb;
+startBtn.onclick = startRound;
+updateScores();
+</script>
+</body>
+</html>
