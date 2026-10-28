@@ -21,10 +21,12 @@
   .row span { flex: 1; text-align: right; }
   .row button { min-width: 84px; padding: 8px 14px; border-radius: 10px; background: rgba(255,255,255,.14); }
   #start, #again { margin: 14px 0 10px; padding: 14px 40px; font-size: 18px; border-radius: 16px; background: linear-gradient(120deg, #7c5cff, #00d4ff); }
+  #mute { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 10px); right: 12px; width: 44px; height: 44px; border-radius: 50%; font-size: 20px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.15); display: none; }
 </style>
 </head>
 <body>
 <div id="hud"><span id="dot"></span><span id="status"></span></div>
+<button id="mute">🔊</button>
 <button id="roll">🎲 تاس بنداز</button>
 
 <div id="setup" class="overlay"><div class="panel">
@@ -42,6 +44,60 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
+// ---------- Sound (Web Audio, no files needed) ----------
+let actx = null, muted = false;
+function initAudio() {
+  try {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+  } catch (e) {}
+}
+// Play one short tone: freq (Hz), duration (s), wave type, volume, optional end freq, start delay (s)
+function tone(freq, dur, type, vol, endFreq, delay) {
+  if (!actx || muted) return;
+  try {
+    const t0 = actx.currentTime + (delay || 0);
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, t0);
+    if (endFreq) o.frequency.exponentialRampToValueAtTime(endFreq, t0 + dur);
+    g.gain.setValueAtTime(vol || 0.15, t0);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t0); o.stop(t0 + dur + 0.02);
+  } catch (e) {}
+}
+// Classic wooden knock: a short filtered noise burst plus a low wooden thump
+function knock(freq, vol, delay) {
+  if (!actx || muted) return;
+  try {
+    const t0 = actx.currentTime + (delay || 0);
+    const len = Math.floor(actx.sampleRate * 0.045);
+    const buf = actx.createBuffer(1, len, actx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+    const src = actx.createBufferSource(); src.buffer = buf;
+    const bp = actx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 3;
+    const g = actx.createGain(); g.gain.value = vol;
+    src.connect(bp); bp.connect(g); g.connect(actx.destination);
+    src.start(t0);
+    tone(freq * 0.22, 0.07, 'sine', vol * 0.5, freq * 0.12, delay);
+  } catch (e) {}
+}
+// Dice rolling on a wooden board: knocks that get slower and softer
+function sfxRoll() {
+  let d = 0;
+  for (let i = 0; i < 12; i++) {
+    knock(900 + Math.random() * 1200, Math.max(0.25, 0.9 - i * 0.05), d);
+    d += 0.03 + i * 0.011;
+  }
+}
+// Piece step: one classic wooden tock
+function sfxHop() { knock(1300, 0.8); }
+function sfxCapture() { tone(420, 0.45, 'sawtooth', 0.16, 70); }
+function sfxPick() { tone(660, 0.08, 'sine', 0.12); }
+function sfxWin() { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.3, 'triangle', 0.18, null, i * 0.15)); }
+
 // ---------- Constants ----------
 const NAMES = ['قرمز', 'سبز', 'زرد', 'آبی'];
 const COL = [0xe53935, 0x43a047, 0xfdd835, 0x1e88e5];
@@ -171,6 +227,7 @@ function tween(d, fn) {
 }
 async function rollDice(v) {
   rolling = true;
+  sfxRoll();
   const qT = new THREE.Quaternion().setFromEuler(new THREE.Euler(...EU[v]));
   const qS = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.random() * 6, Math.random() * 6, Math.random() * 6));
   const ax = new THREE.Vector3(Math.random() + .1, Math.random(), Math.random()).normalize();
@@ -230,6 +287,7 @@ function settle() {
   }
 }
 async function hop(pl, i) {
+  sfxHop();
   const m = pl.mesh[i], [cx, cy] = cellOf(pl.c, pl.prog[i], i);
   const f = m.position.clone(), to = new THREE.Vector3(cx - 7, 0.31, cy - 7);
   await tween(0.2, t => { m.position.lerpVectors(f, to, t); m.position.y = 0.31 + Math.sin(t * Math.PI) * 0.5; });
@@ -253,6 +311,7 @@ async function doMove(pl, i, roll) {
       for (let j = 0; j < 4; j++) {
         if (absIdx(o.c, o.prog[j]) !== a) continue;
         o.prog[j] = 0; cap = true;
+        sfxCapture();
         const [bx, by] = cellOf(o.c, 0, j), m = o.mesh[j], f = m.position.clone();
         await tween(0.5, t => m.position.set(f.x + (bx - 7 - f.x) * t, 0.31 + Math.sin(t * Math.PI) * 2, f.z + (by - 7 - f.z) * t));
       }
@@ -289,7 +348,7 @@ function pickPiece(pl, moves) {
   return new Promise(res => {
     pickable = moves;
     moves.forEach(i => pl.mesh[i].userData.ring.visible = true);
-    pickRes = i => { pickRes = null; pickable = []; moves.forEach(j => pl.mesh[j].userData.ring.visible = false); settle(); res(i); };
+    pickRes = i => { pickRes = null; pickable = []; moves.forEach(j => pl.mesh[j].userData.ring.visible = false); sfxPick(); settle(); res(i); };
     status('روی یکی از مهره‌های چشمک‌زن بزن', pl.c);
   });
 }
@@ -310,6 +369,7 @@ async function turn() {
     const cap = await doMove(pl, m, roll);
     if (cap || pl.prog[m] === 57) extra = true;
     if (pl.prog.every(p => p === 57)) {
+      sfxWin();
       document.getElementById('winText').textContent = '🏆 ' + NAMES[pl.c] + ' برنده شد!';
       document.getElementById('win').style.display = 'flex';
       return;
@@ -327,6 +387,7 @@ function startGame(modes) {
   });
   settle(); cur = 0;
   document.getElementById('hud').style.display = 'flex';
+  document.getElementById('mute').style.display = 'block';
   turn();
 }
 
@@ -342,8 +403,12 @@ modes.forEach((m, c) => {
 });
 document.getElementById('start').onclick = () => {
   if (modes.filter(m => m !== 'off').length < 2) return alert('حداقل دو بازیکن لازمه');
+  initAudio(); // browsers need a tap before sound can play
   document.getElementById('setup').style.display = 'none';
   startGame(modes);
+};
+document.getElementById('mute').onclick = e => {
+  muted = !muted; e.target.textContent = muted ? '🔇' : '🔊';
 };
 document.getElementById('again').onclick = () => location.reload();
 rollBtn.onclick = () => rollRes && rollRes();
